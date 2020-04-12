@@ -1,5 +1,8 @@
 extern crate ndarray;
+mod util;
 use std::collections::HashMap;
+use util::cmp_f64;
+
 /// damping coefficient
 const D: f64 = 0.85;
 /// convergence threshold
@@ -8,10 +11,10 @@ const MIN_DIFF: f64 = 1e-5;
 const STEPS: usize = 10;
 const WINDOW_SIZE: usize = 4;
 
-#[derive(Eq, PartialEq, Hash)]
+#[derive(Eq, PartialEq, Hash, Debug)]
 pub struct Token {
-    term: String,
-    offset_begin: usize,
+    pub term: String,
+    pub offset_begin: usize,
 }
 
 impl Clone for Token {
@@ -23,14 +26,14 @@ impl Clone for Token {
     }
 }
 
-pub type Sentence = Vec<Token>;
-pub type Vocab = HashMap<Token, usize>;
-
 impl Token {
     pub fn offset(&self) -> (usize, usize) {
         (self.offset_begin, self.offset_begin + self.term.len())
     }
 }
+
+pub type Sentence = Vec<Token>;
+pub type Vocab = HashMap<Token, usize>;
 
 fn get_vocab(sentences: &[Sentence]) -> Vocab {
     let mut ret = HashMap::new();
@@ -71,7 +74,7 @@ fn get_matrix(
     // build matrix
     let vocab_size = vocab.len();
     let mut g = ndarray::Array::zeros((vocab_size, vocab_size));
-    for (w1, w2) in token_pairs {
+    for (w1, w2) in token_pairs.iter().take(vocab_size) {
         let (i, j) = (vocab[&w1], vocab[&w2]);
         g[[i, j]] = 1f64
     }
@@ -82,6 +85,7 @@ fn get_matrix(
     let diag = ndarray::Array::from_diag(&diag);
     let sym = added - diag;
 
+    // normalise matrix
     let mut max = std::f64::MIN;
     let mut min = std::f64::MAX;
     for n in sym.iter() {
@@ -97,7 +101,7 @@ fn get_matrix(
 }
 
 /// implementation of TextRank
-pub fn analyze(doc: Vec<Sentence>) {
+pub fn analyze(doc: Vec<Sentence>) -> Vec<(Token, f64)> {
     // TODO pos, window_size, lower, stopwords
     let vocab = get_vocab(&doc);
     let token_pairs = get_token_pairs(WINDOW_SIZE, &doc);
@@ -113,8 +117,14 @@ pub fn analyze(doc: Vec<Sentence>) {
         previous_page_rank = page_rank.sum();
     }
 
-    let mut node_weight: HashMap<_, f64> = HashMap::new();
+    let mut node_weight_vec: Vec<(Token, f64)> = vec![];
     for (i, word) in vocab.iter().enumerate() {
-        node_weight.insert(word, page_rank[[i]]);
+        node_weight_vec.push((word.0.clone(), page_rank[i]));
     }
+
+    node_weight_vec.sort_by(|a, b| cmp_f64(a.1, b.1));
+    node_weight_vec
 }
+
+#[cfg(test)]
+mod test {}
