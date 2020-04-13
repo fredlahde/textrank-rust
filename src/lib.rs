@@ -1,4 +1,5 @@
 extern crate ndarray;
+mod stoplist;
 mod util;
 use std::collections::HashMap;
 use util::cmp_f64;
@@ -8,13 +9,14 @@ const D: f64 = 0.85;
 /// convergence threshold
 const MIN_DIFF: f64 = 1e-5;
 /// iteration steps
-const STEPS: usize = 10;
-const WINDOW_SIZE: usize = 4;
+const STEPS: usize = 20;
+const WINDOW_SIZE: usize = 2;
 
 #[derive(Eq, PartialEq, Hash, Debug)]
 pub struct Token {
     pub term: String,
     pub offset_begin: usize,
+    pub pos: Option<String>,
 }
 
 impl Clone for Token {
@@ -22,6 +24,10 @@ impl Clone for Token {
         Token {
             term: self.term.clone(),
             offset_begin: self.offset_begin,
+            pos: match &self.pos {
+                Some(pos) => Some(pos.clone()),
+                None => None,
+            },
         }
     }
 }
@@ -74,8 +80,11 @@ fn get_matrix(
     // build matrix
     let vocab_size = vocab.len();
     let mut g = ndarray::Array::zeros((vocab_size, vocab_size));
-    for (w1, w2) in token_pairs.iter().take(vocab_size) {
+    for (w1, w2) in token_pairs.iter() {
         let (i, j) = (vocab[&w1], vocab[&w2]);
+        if i >= vocab_size || j >= vocab_size {
+            break;
+        }
         g[[i, j]] = 1f64
     }
 
@@ -100,16 +109,35 @@ fn get_matrix(
     (sym - min) / (max - min)
 }
 
+const VALID_POS: &[&str] = &["NN", "NNS"];
+const PUNCTUATION: &[&str] = &[",", ".", "!", ":"];
+
 /// implementation of TextRank
 pub fn analyze(doc: Vec<Sentence>) -> Vec<(Token, f64)> {
     // TODO pos, window_size, lower, stopwords
-    let vocab = get_vocab(&doc);
-    let token_pairs = get_token_pairs(WINDOW_SIZE, &doc);
+    let stopwords = stoplist::get_stoplist().unwrap();
+    let mut new_doc = vec![];
+    for sent in doc {
+        let mut new_sent = vec![];
+        for tok in sent {
+            if stopwords.contains(&tok.term) || PUNCTUATION.contains(&tok.term.as_str()) {
+                continue;
+            }
+            if let Some(pos) = &tok.pos {
+                if VALID_POS.contains(&pos.as_str()) {
+                    new_sent.push(tok.clone());
+                }
+            }
+        }
+        new_doc.push(new_sent);
+    }
+    let vocab = get_vocab(&new_doc);
+    let token_pairs = get_token_pairs(WINDOW_SIZE, &new_doc);
     let vocab_matrix = get_matrix(&vocab, token_pairs);
     let mut page_rank = ndarray::Array::<f64, _>::ones(vocab.len());
     let mut previous_page_rank = 0f64;
 
-    for _ in 1..STEPS {
+    for _ in 1..=STEPS {
         page_rank = (1f64 - D) + D * vocab_matrix.dot(&page_rank);
         if (previous_page_rank - page_rank.sum()).abs() < MIN_DIFF {
             break;
