@@ -1,4 +1,9 @@
 extern crate ndarray;
+extern crate senna;
+extern crate serde;
+extern crate serde_derive;
+extern crate serde_json;
+mod pos;
 mod stoplist;
 mod util;
 use std::collections::HashMap;
@@ -109,25 +114,31 @@ fn get_matrix(
     (sym - min) / (max - min)
 }
 
-const VALID_POS: &[&str] = &["NN", "NNS"];
+const VALID_POS: &[&str] = &["NN", "NNP", "NNS"];
 const PUNCTUATION: &[&str] = &[",", ".", "!", ":"];
 
 /// implementation of TextRank
-pub fn analyze(doc: Vec<Sentence>) -> Vec<(Token, f64)> {
+pub fn analyze(doc: Vec<Sentence>) -> std::io::Result<Vec<(Token, f64)>> {
     // TODO pos, window_size, lower, stopwords
     let stopwords = stoplist::get_stoplist().unwrap();
     let mut new_doc = vec![];
+    let mut tagger = pos::Tagger::new();
     for sent in doc {
         let mut new_sent = vec![];
-        for tok in sent {
-            if stopwords.contains(&tok.term) || PUNCTUATION.contains(&tok.term.as_str()) {
+        let tags = tagger.tag(
+            sent.iter()
+                .map(|t| t.term.clone())
+                .collect::<Vec<_>>()
+                .as_slice(),
+        );
+        for (i, tok) in sent.iter().enumerate() {
+            if stopwords.contains(&tok.term)
+                || PUNCTUATION.contains(&tok.term.as_str())
+                || !VALID_POS.contains(&tags[i].as_str())
+            {
                 continue;
             }
-            if let Some(pos) = &tok.pos {
-                if VALID_POS.contains(&pos.as_str()) {
-                    new_sent.push(tok.clone());
-                }
-            }
+            new_sent.push(tok.clone());
         }
         new_doc.push(new_sent);
     }
@@ -151,7 +162,7 @@ pub fn analyze(doc: Vec<Sentence>) -> Vec<(Token, f64)> {
     }
 
     node_weight_vec.sort_by(|a, b| cmp_f64(a.1, b.1));
-    node_weight_vec
+    Ok(node_weight_vec)
 }
 
 #[cfg(test)]
